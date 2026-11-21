@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "name": "FieldSampleDrops 战地样本掉落 · 联机版",
+  "resource": "mods/custom/field_sample_drops",
+  "guid": "auto",
+  "optional": {
+    "mod_options_menu": {"min_version": "1.0.0", "api": 1, "bingus_min_release": 18}
+  },
+  "requires": {
+    "bingus": {
+      "min_release": 20,
+      "api": 1
+    },
+    "hd2runtime": {
+      "min_version": "0.50.1",
+      "api": 1,
+      "module": "mods/skyeshade/hd2runtime"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# Credits
+
+- Original MonsterSampleDrop by [kugua](https://ayakamods.com/mods/monstersampledrop-%E6%80%AA%E7%89%A9%E6%8E%89%E8%90%BD%E6%A0%B7%E6%9C%AC.5008/).
+- HellForge, HD2Runtime and engine research by [SkyeShade](https://github.com/SkyeShade).
+- Bingus Shared Loader and Mod Options Menu by [CowboyBingus](https://github.com/CowboyBingus).
+- Treasure Map by [Th3chef](https://github.com/Th3chef/Treasure-Map).
+- Spawn research reference from Link's Link to Memory (MIT), as used by MultiBackpack.
+- OpenAI Codex assisted with implementation, offline tests, and documentation.
+
+# Release status
+
+FieldSampleDrops 1.2.0 targets HellForge 0.4.0-beta, game build 25480438, Bingus Shared Loader v20+ and HD2Runtime 0.50.1. Teammate visibility, pickup and extraction credit are pending two-player verification.
