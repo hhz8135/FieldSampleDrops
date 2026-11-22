@@ -27,11 +27,24 @@
 - **Compatibility:** HellForge **0.4.0-beta**, game build **25480438**.
 - **Required:** Bingus Shared Loader **v20+** and HD2Runtime **0.50.1**. [Bingus Shared Loader](https://ayakamods.com/mods/bingus-shared-loader.3861/) · [HD2Runtime 0.50.1](https://github.com/SkyeShade/HD2Runtime/releases/tag/v0.50.1)
 - **Optional:** Mod Options Menu for in-game settings and Treasure Map **1.4.0** for sample type detection.
-- **Multiplayer preview:** The host must have the mod installed to spawn drops. Teammate visibility, pickup, and extraction credit are pending two-player verification.
+- **Multiplayer:** The host spawns drops when the mod is installed on their side. All players in the session can pick up the drops, as verified in a live co-op session.
 
 1. Download the [v1.2.0 installer ZIP](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip) or get it from [AyakaMods](https://ayakamods.com/mods/fieldsampledrops.6166/).
 2. Import and enable the ZIP in the **HellForge Launcher** under **Mods**, then restart the game session. If you use a mod manager such as HDArsenal, select your HellForge installation as the deployment target.
 3. With Mod Options Menu installed, go to **Esc → MODS → 战地样本掉落 · 联机版** to adjust the thresholds and range. Changes apply from the next mission.
+
+## Development & Testing
+
+From the repository root, run the builder in PowerShell. It writes `build/FieldSampleDrops-<version>.zip` using the version in `VERSION`. Git ignores the output directory.
+
+```powershell
+.\build.ps1
+python tests/run_regression.py
+```
+
+The regression runner tests the installer ZIP in an isolated LuaJIT state. It needs the `HD2Runtime 0.50.1` SDK and a compatible Windows `lua51.dll` from a HellForge installation. For a different installation or SDK location, pass `--lua-dll` and `--sdk-dir`. To test a specific package, pass its path as the first argument. See [the test setup](tests/README.md) for details.
+
+On a build or signature mismatch, check the [FieldSampleDrops] entries in HD2Runtime.log. If the loader rejects the game build before the addon starts, see BingusSharedLoader.log.
 
 ## Changelog
 
@@ -43,7 +56,7 @@ Thanks to **kugua**, the author of **MonsterSampleDrop**, for the inspiration an
 
 ## License
 
-Project-wide MIT licensing is pending confirmation of the terms for code adapted from MonsterSampleDrop.
+Original code contributed to FieldSampleDrops is licensed under the [MIT License](https://opensource.org/license/mit). Code adapted from **MonsterSampleDrop** retains its original attribution and remains subject to its original terms. See [NOTICE.md](NOTICE.md).
 
 ---
 
@@ -66,11 +79,24 @@ Project-wide MIT licensing is pending confirmation of the terms for code adapted
 - **版本支持：** HellForge **0.4.0-beta**，游戏构建 **25480438**。
 - **必需前置：** Bingus Shared Loader **v20+** 和 HD2Runtime **0.50.1**。
 - **可选前置：** Mod Options Menu 提供游戏内设置。Treasure Map **1.4.0** 用于辅助判断样本类型。
-- **联机预览：** 由安装模组的房主生成掉落。队友能否看到并拾取样本，以及撤离后是否正确结算，仍待双人实测。
+- **联机：** 房主安装模组后可触发掉落。根据双人实机测试，掉落的样本全队都可以拾取。
 
 1. 下载 [v1.2.0 安装包](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip)，也可从 [AyakaMods](https://ayakamods.com/mods/fieldsampledrops.6166/) 下载。
 2. 在 **HellForge 启动器 → Mods** 中导入并启用 ZIP，重启游戏会话。使用 HDArsenal 等模组管理器时，请将部署目标设为 HellForge 安装目录。
 3. 如果装了 Mod Options Menu，在 **Esc → MODS → 战地样本掉落 · 联机版** 调整阈值与距离，下一局生效。
+
+## 开发与测试
+
+在仓库根目录用 PowerShell 运行以下命令。构建脚本读取 `VERSION`，将安装包输出到 Git 忽略的 `build/` 目录。
+
+```powershell
+.\build.ps1
+python tests/run_regression.py
+```
+
+回归测试在独立 LuaJIT 环境中加载安装包，依赖 **HD2Runtime 0.50.1 SDK** 和 HellForge 安装中的 Windows 版 `lua51.dll`。SDK 或 DLL 在其他位置时，可传入 `--sdk-dir` 和 `--lua-dll`。要测试指定安装包，可把 ZIP 路径作为第一个参数。详见[测试说明](tests/README.md)。
+
+构建号或签名不匹配时，在 HD2Runtime.log 中搜索 [FieldSampleDrops]。如果加载器在启动模组前已拒绝该游戏构建，请查 BingusSharedLoader.log。
 
 ## 致谢
 
@@ -78,4 +104,4 @@ Project-wide MIT licensing is pending confirmation of the terms for code adapted
 
 ## 许可证
 
-全项目采用 MIT 许可证仍待确认 MonsterSampleDrop 衍生代码的授权范围。
+FieldSampleDrops 的原创代码采用 [MIT 许可证](https://opensource.org/license/mit)。改编自 **MonsterSampleDrop** 的部分保留原作者署名，并继续适用原项目条款。其他署名见 [NOTICE.md](NOTICE.md)。

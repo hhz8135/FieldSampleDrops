@@ -1,0 +1,14 @@
+# Build and release artifacts
+/releases/*.zip
+/build/
+/dist/
+/.tools/
+
+# Local runtime settings and logs
+*_CONFIG.ini
+*.log
+
+# Python and editor files
+__pycache__/
+*.pyc
+.vscode/

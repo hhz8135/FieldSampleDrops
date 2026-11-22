@@ -1,10 +1,22 @@
 -- Build 25480438. Resource names and identities from HD2Runtime by SkyeShade
 -- and Treasure Map by Th3chef. The spawn ABI is corroborated by HD2Runtime's
 -- Pelican research and Link's Link to Memory (MIT), as used by MultiBackpack.
+local supported_game_build = '25480438'
+
+local function check_runtime_build(hd2)
+    local status, info = hd2.build()
+    if status == 'matched' then return true end
+    local detail = type(info) == 'table' and info.reason
+    local reason = 'Expected game build ' .. supported_game_build .. ', HD2Runtime reported ' .. tostring(status)
+    if detail then reason = reason .. ' (' .. tostring(detail) .. ')' end
+    return false, reason, status == 'not_ready'
+end
+
 local function make_pickups(hd2, mod)
     local ffi = require('ffi')
     local world_module = require('hd2runtime/runtime/event_world')
     local scheduler = require('hd2runtime/runtime/scheduler')
+    local hellforge = require('hd2runtime/runtime/hellforge')
     local assets = require('hd2runtime/core/assets')
     local bytes = require('hd2runtime/core/bytes')
 
@@ -32,28 +44,44 @@ local function make_pickups(hd2, mod)
     local held_packages = {}
     local bridge, bridge_mod
 
-    ffi.cdef[[
-        typedef struct {
-            uint32_t size, bridge, sdk, ready;
-            const char *build, *logs;
-        } FieldDropHellForgeInfo;
-        int fielddrop_hf_info(FieldDropHellForgeInfo *) __asm__("hellforge_lua_info");
-        void *fielddrop_hf_mod(const char *) __asm__("hellforge_lua_mod");
-        int fielddrop_hf_load_package(void *, uint64_t) __asm__("hellforge_lua_load_package");
-    ]]
-    local bridge_info = ffi.new('FieldDropHellForgeInfo[1]')
-    bridge_info[0].size = ffi.sizeof('FieldDropHellForgeInfo')
-
-    local function check_hellforge(runtime)
-        if not runtime.module('hellforge_modloader.dll') then return false, 'HellForge bridge unavailable' end
-        bridge = bridge or ffi.load('hellforge_modloader.dll')
-        if bridge.fielddrop_hf_info(bridge_info) ~= 1 or bridge_info[0].build == nil then
-            return false, 'HellForge bridge not ready', true
+    local function check_hellforge()
+        bridge = hellforge.backend()
+        if not bridge then return false, 'HellForge bridge unavailable: ' .. tostring(hellforge.reason) end
+        local info = bridge.info()
+        local build = info and info.build
+        if not build then return false, 'HellForge bridge not ready', true end
+        if build ~= supported_game_build then
+            return false, 'Expected HellForge game build ' .. supported_game_build .. ', found ' .. build
         end
-        local info = bridge_info[0]
-        if ffi.string(info.build) ~= '25480438' then return false, 'Unsupported HellForge build' end
-        if tonumber(info.ready) % 4 ~= 3 then return false, 'HellForge entity data not ready', true end
+        if (tonumber(info.ready) or 0) % 4 ~= 3 then return false, 'HellForge entity data not ready', true end
         return true
+    end
+
+    local function check_pin(world, rva, expected, label)
+        local actual = world.view.read(world.game + rva, #expected)
+        if not actual then return false, label .. ' code is not readable yet', true end
+        if actual ~= expected then return false, label .. ' code differs from the reviewed build' end
+        return true
+    end
+
+    local function compatibility()
+        local matched, reason, retryable = check_runtime_build(hd2)
+        if not matched then return false, reason, retryable end
+        matched, reason, retryable = check_hellforge()
+        if not matched then return false, reason, retryable end
+        local world, why = world_module.open()
+        if not world then
+            why = tostring(why)
+            if why:find('native event structure changed', 1, true) or why:find('image size changed', 1, true) then
+                return false, why
+            end
+            return false, 'Game world unavailable: ' .. why, true
+        end
+        matched, reason, retryable = check_pin(world, spawn_rva, spawn_code, 'Sample spawn')
+        if not matched then return false, reason, retryable end
+        matched, reason, retryable = check_pin(world, package_rva, package_code, 'Sample package lookup')
+        if not matched then return false, reason, retryable end
+        return true, world
     end
 
     local function registered(view, world_address, resource)
@@ -72,9 +100,8 @@ local function make_pickups(hd2, mod)
     local function package_ready(world, resource)
         local view = world.view
         local address = world.game + package_rva
-        if view.read(address, #package_code) ~= package_code then
-            return false, 'Sample package lookup code differs from the reviewed build'
-        end
+        local pinned, reason, retryable = check_pin(world, package_rva, package_code, 'Sample package lookup')
+        if not pinned then return false, reason, retryable end
         local lookup = ffi.cast('const uint8_t *(*)(uint64_t)', address)
         local record = lookup(resource.value)
         if record == nil then return false, 'Sample package record unavailable', true end
@@ -85,11 +112,11 @@ local function make_pickups(hd2, mod)
         -- This is needed even when the host already has it resident from the map.
         if held_packages[hex] then return true end
         if not refused_packages[hex] then
-            bridge_mod = bridge_mod or bridge.fielddrop_hf_mod('field_sample_drops')
+            bridge_mod = bridge_mod or bridge.mod('field_sample_drops')
             if bridge_mod ~= nil then
                 local id = ffi.new('uint64_t[1]')
                 ffi.copy(id, package, 8)
-                local status = bridge.fielddrop_hf_load_package(bridge_mod, id[0])
+                local status = bridge.load_package(bridge_mod, id[0])
                 if status == 2 then
                     held_packages[hex] = true
                     return true
@@ -110,12 +137,8 @@ local function make_pickups(hd2, mod)
 
     local function session()
         if not scheduler.in_update() then return false, 'Sample drop needs the game update', true end
-        local build = hd2.build()
-        if build ~= 'matched' then return false, 'HD2Runtime build check did not match', build == 'not_ready' end
-        local world = world_module.open()
-        if not world then return false, 'Game world unavailable', true end
-        local hellforge, reason, retryable = check_hellforge(world.runtime)
-        if not hellforge then return false, reason, retryable end
+        local compatible, world, retryable = compatibility()
+        if not compatible then return false, world, retryable end
         local state = world_module.game_state(world)
         if not state or not state.mission then return false, 'No active mission', true end
         if state.host ~= true then return false, 'Samples require the mission host', state.host == nil end
@@ -135,9 +158,6 @@ local function make_pickups(hd2, mod)
         if not allowed then return false, world, count end
 
         local view = world.view
-        if view.read(world.game + spawn_rva, #spawn_code) ~= spawn_code then
-            return false, 'Sample spawn code differs from the reviewed build'
-        end
         local world_address = view.pointer(world.game + 0x346BF98)
         if not world_address or world_address == 0 or view.read(world_address + 0xF3EF28, #zero_context) ~= zero_context then
             return false, 'Default entity spawn context unavailable', true
@@ -145,6 +165,8 @@ local function make_pickups(hd2, mod)
         local ready, asset_reason, asset_retryable = package_ready(world, resource)
         if not ready then return false, asset_reason, asset_retryable end
         if not registered(view, world_address, resource) then return false, 'Sample entity type not registered', true end
+        local pinned, reason, retryable = check_pin(world, spawn_rva, spawn_code, 'Sample spawn')
+        if not pinned then return false, reason, retryable end
         return true, world, resource, count
     end
 
@@ -158,7 +180,8 @@ local function make_pickups(hd2, mod)
             mod:log(('[FieldSampleDrops] co-op entity=%d network_id=%d'):format(entity, id))
         else
             hd2.after(1, function()
-                local current = network_id(world_module.open())
+                local compatible, current_world = compatibility()
+                local current = compatible and network_id(current_world) or nil
                 mod:log(('[FieldSampleDrops] co-op entity=%d network_id=%s after 1 s'):format(entity, tostring(current)))
             end, {scope='mission'})
         end
@@ -209,5 +232,5 @@ local function make_pickups(hd2, mod)
         end
     end
 
-    return spawn, host_session, preload_sample_packages
+    return spawn, host_session, preload_sample_packages, compatibility
 end

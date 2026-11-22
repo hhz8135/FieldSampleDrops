@@ -1,8 +1,50 @@
 -- HellForge 25480438 / HD2Runtime 0.50.1
 local hd2 = require('mods/skyeshade/hd2runtime')
 local mod = hd2.mod()
-local pickups, host_session, preload_sample_packages = make_pickups(hd2, mod)
+local pickups, host_session, preload_sample_packages, compatibility_probe = make_pickups(hd2, mod)
 local sample_policy = make_sample_policy(hd2, mod)
+local in_mission, mission_id
+local seen, progress, pending, awaiting_policy
+local clear_hud
+local disabled, waiting_for_compatibility
+
+local function disable(reason)
+    if disabled then return end
+    disabled = true
+    pending, awaiting_policy = {}, {}
+    if clear_hud then clear_hud() end
+    mod:log('[FieldSampleDrops] Disabled for this session: ' .. tostring(reason))
+end
+
+local function check_compatibility()
+    if disabled then return false end
+    local checked, ready, reason, retryable = pcall(compatibility_probe)
+    if not checked then disable(ready); return false end
+    if ready then return true end
+    if not retryable then disable(reason); return false end
+    return false, reason
+end
+
+local function startup_compatibility()
+    local ready, reason = check_compatibility()
+    if ready then
+        mod:log('[FieldSampleDrops] Compatibility verified for game build ' .. supported_game_build)
+    elseif reason and reason ~= waiting_for_compatibility then
+        waiting_for_compatibility = reason
+        mod:log('[FieldSampleDrops] Waiting for compatibility checks: ' .. reason)
+    end
+    return ready
+end
+
+local ready = startup_compatibility()
+if disabled then return end
+if not ready then
+    local timer
+    timer = hd2.every(0.25, function()
+        if startup_compatibility() or disabled then timer:cancel() end
+    end, {scope='session',id='field_sample_drops_compatibility'})
+end
+
 local names = {'普通样本', '稀有样本', '超级样本'}
 local defaults = {20, 40, 75}
 local default_radius, max_radius = 30, 300
@@ -85,8 +127,6 @@ local function mission_settings()
     if valid_radius(radius) then drop_radius_m = radius end
 end
 
-local in_mission, mission_id
-local seen, progress, pending, awaiting_policy
 local warned = {}
 local function warn_once(reason)
     reason = tostring(reason)
@@ -119,10 +159,19 @@ local function credit(position, allowed)
     end
 end
 
+local function allowed_samples()
+    local allowed, reason, incompatible = sample_policy.allowed()
+    if incompatible then disable(reason) end
+    return allowed, reason
+end
+
 local function flush_kills()
     if #awaiting_policy == 0 then return end
-    local allowed, reason = sample_policy.allowed()
-    if not allowed then warn_once(reason or 'waiting for mission difficulty'); return end
+    local allowed, reason = allowed_samples()
+    if not allowed then
+        if not disabled then warn_once(reason or 'waiting for mission difficulty') end
+        return
+    end
     local kills = awaiting_policy
     awaiting_policy = {}
     for _, position in ipairs(kills) do credit(position, allowed) end
@@ -159,8 +208,10 @@ local function eligible_host()
 end
 
 hd2.events.on('entity_killed', function(e)
-    if not in_mission or not e or not e.enemy or e.local_killer ~= true then return end
+    if disabled or not in_mission or not e or not e.enemy or e.local_killer ~= true then return end
     if mission_id and e.mission and e.mission ~= mission_id then return end
+    local compatible, waiting = check_compatibility()
+    if not compatible then if waiting then warn_once(waiting) end; return end
     local id = e.entity_id
     if type(id) ~= 'number' or seen[id] or not is_host() then return end
     local corpse = point(e.position)
@@ -180,7 +231,7 @@ end, {id='field_sample_drops_kill', scope='session'})
 -- Original compact progress HUD.
 local hud_state = { gui = nil, gui_world = nil, ids = {}, last_key = '' }
 
-local function clear_hud()
+clear_hud = function()
     local sr = rawget(_G, 'stingray') or _G
     local Gui = sr.Gui
     if hud_state.gui and Gui then
@@ -261,6 +312,7 @@ end
 
 
 hd2.events.on('mission_started', function(e)
+    if disabled then return end
     mission_settings()
     seen, progress, pending, awaiting_policy, warned = {}, {0,0,0}, {}, {}, {}
     mission_id, in_mission = e.mission, true
@@ -270,6 +322,8 @@ hd2.events.on('mission_started', function(e)
     local preload_tick = 0
     hd2.every(0.25, function()
         if not in_mission then return end
+        local compatible, waiting = check_compatibility()
+        if not compatible then if waiting then warn_once(waiting) end; return end
         if not is_host() or (legacy_loaded() and not eligible_host()) then
             pending, awaiting_policy = {}, {}
             if #hud_state.ids > 0 then clear_hud() end
@@ -277,10 +331,13 @@ hd2.events.on('mission_started', function(e)
         end
         sample_policy.refresh()
         if preload_tick == 0 then
-            local allowed = sample_policy.allowed()
+            local allowed, reason = allowed_samples()
+            if disabled then return end
             if allowed then
                 local ok, why = pcall(preload_sample_packages, allowed)
                 if not ok then warn_once(why) end
+            elseif reason then
+                warn_once(reason)
             end
         end
         preload_tick = (preload_tick + 1) % 8

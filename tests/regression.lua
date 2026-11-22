@@ -117,6 +117,9 @@ local function new_fixture()
         ['mods/skyeshade/hd2runtime'] = hd2,
         ['hd2runtime/runtime/event_world'] = {open = function() return nil, 'offline fixture' end},
         ['hd2runtime/runtime/scheduler'] = {in_update = function() return true end},
+        ['hd2runtime/runtime/hellforge'] = {backend = function()
+            return {info = function() return {build = '25480438', ready = 3} end}
+        end},
         ['hd2runtime/core/assets'] = {},
         ['hd2runtime/core/bytes'] = {unhex = unhex},
     }
@@ -164,6 +167,7 @@ local function new_fixture()
         return true, nil, state.total_players
     end
     env.fixture_preload = function() state.preloads = state.preloads + 1 end
+    env.fixture_compatibility_probe = function() return true end
     env.fixture_sample_policy = {
         reset = function() state.policy_resets = state.policy_resets + 1 end,
         allowed = function() return state.policy_allowed, 'fixture sample policy blocked' end,
@@ -184,7 +188,7 @@ local function new_fixture()
             local binding = assert(body:match('\n(local pickups[%w_, ]* = make_pickups%(hd2, mod%))'),
                 'expected the packaged pickup adapter binding')
             local replacement = binding:gsub('make_pickups%(hd2, mod%)$',
-                'fixture_pickups, fixture_host_session, fixture_preload')
+                'fixture_pickups, fixture_host_session, fixture_preload, fixture_compatibility_probe')
             body = replace_once(body, binding, replacement)
             body = replace_once(body, 'local sample_policy = make_sample_policy(hd2, mod)',
                 'local sample_policy = fixture_sample_policy')

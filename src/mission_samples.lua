@@ -1,5 +1,5 @@
 -- Active mission difficulty and optional Treasure Map 1.4.0 sample evidence.
-local function make_sample_policy(_hd2, _mod, options)
+local function make_sample_policy(hd2, mod, options)
     options = options or {}
     local difficulties = {
         {0x953212, '418b85c4180500'},
@@ -19,12 +19,13 @@ local function make_sample_policy(_hd2, _mod, options)
     }
     local kinds = {'common', 'rare', 'super'}
     local token, baseline, last_scan, known, next_read
-    local world_api, bytes, difficulty_world, hud_world
+    local world_api, bytes, hud_world, hud_disabled
 
     local function matches(world, pins)
         for _, pin in ipairs(pins) do
             local expected = bytes.unhex(pin[2])
             local actual = world.view.read(world.game + pin[1], #expected)
+            if not actual then return nil end
             if actual ~= expected and (not pin[3] or actual ~= bytes.unhex(pin[3])) then return false end
         end
         return true
@@ -36,14 +37,15 @@ local function make_sample_policy(_hd2, _mod, options)
     end
 
     local function current_difficulty()
+        local matched, reason, retryable = check_runtime_build(hd2)
+        if not matched then return nil, reason, nil, not retryable end
         world_api = world_api or require('hd2runtime/runtime/event_world')
         bytes = bytes or require('hd2runtime/core/bytes')
         local world = world_api.open()
         if not world or not active(world) then return nil, 'Current mission is unavailable' end
-        if difficulty_world ~= world then
-            if not matches(world, difficulties) then return nil, 'Mission difficulty layout changed' end
-            difficulty_world = world
-        end
+        local pinned = matches(world, difficulties)
+        if pinned == false then return nil, 'Mission difficulty layout changed', nil, true end
+        if not pinned then return nil, 'Mission difficulty code is not readable yet' end
         local view, game = world.view, world.game
         local manager = view.pointer(game + 0x3326D10)
         local level = manager and view.u32(manager + 0x518C4)
@@ -122,7 +124,13 @@ local function make_sample_policy(_hd2, _mod, options)
         end
         if parsed ~= tonumber(entries) then return end
         if hud_world ~= world then
-            if not matches(world, hud_proofs) then return end
+            local pinned = matches(world, hud_proofs)
+            if pinned == false then
+                hud_disabled = true
+                known = {}
+                mod:log('[FieldSampleDrops] Treasure Map HUD layout changed; using mission difficulty for sample types')
+            end
+            if not pinned then return end
             hud_world = world
         end
         local view, game = world.view, world.game
@@ -175,6 +183,7 @@ local function make_sample_policy(_hd2, _mod, options)
         if options.sample_snapshot then
             read, evidence = pcall(provider_evidence)
         else
+            if hud_disabled then return end
             local treasure = rawget(_G, 'ChefTreasureMap')
             if type(treasure) ~= 'table' or treasure.version ~= '1.4.0' or treasure.status ~= 'map open' then return end
             local now = os.clock()
@@ -213,10 +222,10 @@ local function make_sample_policy(_hd2, _mod, options)
 
     function policy.allowed()
         if not token then return nil, 'Mission sample policy has not started' end
-        local ok, level, why, world = pcall(options.difficulty or current_difficulty)
+        local ok, level, why, world, incompatible = pcall(options.difficulty or current_difficulty)
         if not ok then return nil, 'Current mission difficulty could not be read' end
         if type(level) ~= 'number' or level < 1 or level > 11 or level % 1 ~= 0 then
-            return nil, why or 'Current mission difficulty is not ready'
+            return nil, why or 'Current mission difficulty is not ready', incompatible
         end
         refresh(world)
         local allowed = {true, level >= 4, level >= 6}

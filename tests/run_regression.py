@@ -6,6 +6,7 @@ import argparse
 import ctypes
 import importlib.util
 import json
+import re
 import struct
 import sys
 import zipfile
@@ -13,14 +14,36 @@ from pathlib import Path
 
 
 TEST_DIR = Path(__file__).resolve().parent
-ARCHIVE_TOOL = TEST_DIR.parents[1] / ".tools" / "sdk" / "tools" / "hd2_archive.py"
+PROJECT_DIR = TEST_DIR.parent
+SDK_READER = Path("tools") / "hd2_archive.py"
 DEFAULT_DLL = Path(r"E:\Hellforge\HellForge\game\bin\lua51.dll")
 
 
-def read_addon(package: Path) -> tuple[bytes, str]:
-    spec = importlib.util.spec_from_file_location("hd2_archive", ARCHIVE_TOOL)
+def default_package() -> Path:
+    version = (PROJECT_DIR / "VERSION").read_text(encoding="utf-8-sig").strip()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        raise ValueError("VERSION must contain major.minor.patch")
+    package = PROJECT_DIR / "build" / f"FieldSampleDrops-{version}.zip"
+    if not package.is_file():
+        raise FileNotFoundError(f"{package} is missing. Run build.ps1 first.")
+    return package
+
+
+def default_sdk_dir() -> Path:
+    local_sdk = PROJECT_DIR / ".tools" / "sdk"
+    workspace_sdk = PROJECT_DIR.parent / ".tools" / "sdk"
+    if not (local_sdk / SDK_READER).is_file() and (workspace_sdk / SDK_READER).is_file():
+        return workspace_sdk
+    return local_sdk
+
+
+def read_addon(package: Path, sdk_dir: Path | None = None) -> tuple[bytes, str]:
+    archive_tool = (sdk_dir if sdk_dir is not None else default_sdk_dir()) / SDK_READER
+    if not archive_tool.is_file():
+        raise FileNotFoundError(f"SDK archive reader not found at {archive_tool}. Pass --sdk-dir with the SDK root.")
+    spec = importlib.util.spec_from_file_location("hd2_archive", archive_tool)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load SDK archive reader at {ARCHIVE_TOOL}")
+        raise RuntimeError(f"cannot load SDK archive reader at {archive_tool}")
     archive = importlib.util.module_from_spec(spec)
     sys.dont_write_bytecode = True
     spec.loader.exec_module(archive)
@@ -93,17 +116,22 @@ def run_lua(dll: Path, harness: Path, body: bytes, name: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("package", type=Path, help="FieldSampleDrops ZIP to test")
+    parser.add_argument("package", nargs="?", type=Path, help="ZIP to test (defaults to the build matching VERSION)")
+    parser.add_argument("--sdk-dir", type=Path, help="HD2Runtime SDK root containing tools/hd2_archive.py")
     parser.add_argument("--harness", type=Path, default=TEST_DIR / "regression.lua")
     parser.add_argument("--lua-dll", type=Path, default=DEFAULT_DLL)
     arguments = parser.parse_args()
+    package = arguments.package
     try:
-        body, name = read_addon(arguments.package)
+        if package is None:
+            package = default_package()
+        body, name = read_addon(package, arguments.sdk_dir)
         run_lua(arguments.lua_dll, arguments.harness, body, name)
     except (OSError, ValueError, KeyError, RuntimeError, struct.error, zipfile.BadZipFile) as error:
-        print(f"FAIL {arguments.package.name}: {error}", file=sys.stderr)
+        label = package.name if package is not None else "default build"
+        print(f"FAIL {label}: {error}", file=sys.stderr)
         return 1
-    print(f"PASS {arguments.package.name} ({arguments.harness.name})")
+    print(f"PASS {package.name} ({arguments.harness.name})")
     return 0
 
 
