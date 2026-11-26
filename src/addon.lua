@@ -1,7 +1,7 @@
 -- HellForge 25480438 / HD2Runtime 0.50.1
 local hd2 = require('mods/skyeshade/hd2runtime')
 local mod = hd2.mod()
-local pickups, host_session, preload_sample_packages, compatibility_probe = make_pickups(hd2, mod)
+local pickups, host_session, preload_sample_packages, compatibility_probe, local_position = make_pickups(hd2, mod)
 local sample_policy = make_sample_policy(hd2, mod)
 local in_mission, mission_id
 local seen, progress, pending, awaiting_policy
@@ -20,7 +20,7 @@ local function check_compatibility()
     if disabled then return false end
     local checked, ready, reason, retryable = pcall(compatibility_probe)
     if not checked then disable(ready); return false end
-    if ready then return true end
+    if ready then return true, reason end
     if not retryable then disable(reason); return false end
     return false, reason
 end
@@ -128,29 +128,42 @@ local function mission_settings()
 end
 
 local warned = {}
-local function warn_once(reason)
+local function warn_once(reason, key)
     reason = tostring(reason)
-    if not warned[reason] then warned[reason] = true; mod:log('[FieldSampleDrops] ' .. reason) end
+    key = key or reason
+    if not warned[key] then warned[key] = true; mod:log('[FieldSampleDrops] ' .. reason) end
+end
+
+local kill_events, stat_kills, counted
+local function log_progress()
+    mod:log(('[FieldSampleDrops] mission progress; kill events %d, stat kills %d, nearby counted %d, tiers %d/%d/%d, queued kills %d, pending drops %d')
+        :format(kill_events, stat_kills, counted, progress[1], progress[2], progress[3], #awaiting_policy, #pending))
 end
 
 -- No inventory writes. Only failures known to precede submission are eligible for retry.
 local function attempt(tier, position)
     local ok, accepted, reason, retryable = pcall(pickups, tier, position)
-    if not ok then warn_once(accepted); return false end
+    if not ok then
+        warn_once(('Tier %d spawn error: %s'):format(tier, tostring(accepted)), 'spawn_error_' .. tier)
+        return false
+    end
     if accepted then
         mod:log(('[FieldSampleDrops] spawned tier %d at %.1f %.1f %.1f'):format(tier,position.x,position.y,position.z))
         return false
     end
-    warn_once(reason or 'spawn refused')
+    warn_once(('Tier %d spawn %s: %s'):format(tier, retryable and 'deferred' or 'refused', reason or 'unknown reason'))
     return retryable == true
 end
 
 local function credit(position, allowed)
+    counted = counted + 1
+    if counted == 1 then warn_once('first nearby kill counted') end
     for tier = 1, 3 do
         if allowed[tier] then
             progress[tier] = progress[tier] + 1
             if progress[tier] >= thresholds[tier] then
                 progress[tier] = 0
+                warn_once(('tier %d threshold reached'):format(tier))
                 if attempt(tier, position) then
                     pending[#pending+1] = {tier=tier, position=position}
                 end
@@ -208,25 +221,51 @@ local function eligible_host()
 end
 
 hd2.events.on('entity_killed', function(e)
-    if disabled or not in_mission or not e or not e.enemy or e.local_killer ~= true then return end
-    if mission_id and e.mission and e.mission ~= mission_id then return end
-    local compatible, waiting = check_compatibility()
-    if not compatible then if waiting then warn_once(waiting) end; return end
+    if disabled or not in_mission or not e then return end
+    if mission_id and e.mission and e.mission ~= mission_id then
+        warn_once('Kill skipped: from a different mission')
+        return
+    end
+    kill_events = kill_events + 1
+    if kill_events == 1 then warn_once('received first entity_killed event') end
+    if not e.enemy then warn_once('Kill skipped: victim is not an enemy'); return end
+    if e.local_killer ~= true then
+        warn_once('Kill skipped: local credit was not confirmed (local_killer=' .. tostring(e.local_killer) .. ')',
+            'kill_credit')
+        return
+    end
+    local compatible, world_or_reason = check_compatibility()
+    if not compatible then if world_or_reason then warn_once(world_or_reason) end; return end
     local id = e.entity_id
-    if type(id) ~= 'number' or seen[id] or not is_host() then return end
+    if type(id) ~= 'number' then warn_once('Kill skipped: missing victim entity ID'); return end
+    if seen[id] then warn_once('Kill skipped: duplicate victim entity ID'); return end
+    if not is_host() then warn_once('Kill skipped: mission host authority unavailable'); return end
     local corpse = point(e.position)
-    if not corpse then return end
-    local player = hd2.local_player()
-    local origin = player and point(player:position())
-    if not origin then return end
+    if not corpse then warn_once('Kill skipped: victim position unavailable'); return end
+    local position, why = local_position(world_or_reason)
+    local origin = point(position)
+    if not origin then warn_once('Kill skipped: ' .. (why or 'local Helldiver position unavailable')); return end
     seen[id] = true
     local dx, dy, dz = corpse.x-origin.x, corpse.y-origin.y, corpse.z-origin.z
-    if dx*dx + dy*dy + dz*dz > drop_radius_m*drop_radius_m then return end
+    local distance_sq = dx*dx + dy*dy + dz*dz
+    if distance_sq > drop_radius_m*drop_radius_m then
+        warn_once(('Kill skipped: %.1f m exceeds %d m radius'):format(math.sqrt(distance_sq), drop_radius_m),
+            'kill_distance')
+        return
+    end
     local eligible, reason = eligible_host()
     if not eligible then warn_once(reason or 'Cannot confirm the mission host'); return end
     awaiting_policy[#awaiting_policy+1] = corpse
     flush_kills()
 end, {id='field_sample_drops_kill', scope='session'})
+
+-- Aggregate stats corroborate event delivery. Only entity_killed has the victim position.
+hd2.events.on('player_kill_credited', function(e)
+    if disabled or not in_mission or not e or (e.mission and mission_id and e.mission ~= mission_id) then return end
+    if type(e.kills) ~= 'number' or e.kills <= 0 then return end
+    if stat_kills == 0 then warn_once('received first player_kill_credited stat event') end
+    stat_kills = stat_kills + e.kills
+end, {id='field_sample_drops_kill_stats', scope='session'})
 
 -- Original compact progress HUD.
 local hud_state = { gui = nil, gui_world = nil, ids = {}, last_key = '' }
@@ -315,13 +354,17 @@ hd2.events.on('mission_started', function(e)
     if disabled then return end
     mission_settings()
     seen, progress, pending, awaiting_policy, warned = {}, {0,0,0}, {}, {}, {}
+    kill_events, stat_kills, counted = 0, 0, 0
     mission_id, in_mission = e.mission, true
     sample_policy.reset()
     mod:log(('[FieldSampleDrops] mission started; thresholds %d/%d/%d, radius %d m')
         :format(thresholds[1], thresholds[2], thresholds[3], drop_radius_m))
     local preload_tick = 0
+    local ticks = 0
     hd2.every(0.25, function()
-        if not in_mission then return end
+        if disabled or not in_mission then return end
+        ticks = ticks + 1
+        if ticks == 120 then log_progress() end
         local compatible, waiting = check_compatibility()
         if not compatible then if waiting then warn_once(waiting) end; return end
         if not is_host() or (legacy_loaded() and not eligible_host()) then
@@ -334,8 +377,8 @@ hd2.events.on('mission_started', function(e)
             local allowed, reason = allowed_samples()
             if disabled then return end
             if allowed then
-                local ok, why = pcall(preload_sample_packages, allowed)
-                if not ok then warn_once(why) end
+                local ok, why = pcall(preload_sample_packages, allowed, warn_once)
+                if not ok then warn_once('Sample preload error: ' .. tostring(why), 'preload_error') end
             elseif reason then
                 warn_once(reason)
             end
@@ -357,9 +400,10 @@ hd2.events.on('mission_started', function(e)
 end, {id='field_sample_drops_start', scope='session'})
 
 hd2.events.on('mission_ended', function()
+    if in_mission and not disabled then log_progress() end
     in_mission, mission_id = false, nil
     seen, pending, awaiting_policy = {}, {}, {}
     clear_hud()
     hud_state.gui, hud_state.gui_world = nil, nil
 end, {id='field_sample_drops_end', scope='session'})
-mod:log(('[FieldSampleDrops] 1.2.0 loaded; radius 1-%d m, default %d m'):format(max_radius, default_radius))
+mod:log(('[FieldSampleDrops] 1.2.1 loaded; radius 1-%d m, default %d m'):format(max_radius, default_radius))

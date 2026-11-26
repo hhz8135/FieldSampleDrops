@@ -168,6 +168,7 @@ local function new_fixture()
     end
     env.fixture_preload = function() state.preloads = state.preloads + 1 end
     env.fixture_compatibility_probe = function() return true end
+    env.fixture_local_position = function() return player:position() end
     env.fixture_sample_policy = {
         reset = function() state.policy_resets = state.policy_resets + 1 end,
         allowed = function() return state.policy_allowed, 'fixture sample policy blocked' end,
@@ -188,7 +189,7 @@ local function new_fixture()
             local binding = assert(body:match('\n(local pickups[%w_, ]* = make_pickups%(hd2, mod%))'),
                 'expected the packaged pickup adapter binding')
             local replacement = binding:gsub('make_pickups%(hd2, mod%)$',
-                'fixture_pickups, fixture_host_session, fixture_preload, fixture_compatibility_probe')
+                'fixture_pickups, fixture_host_session, fixture_preload, fixture_compatibility_probe, fixture_local_position')
             body = replace_once(body, binding, replacement)
             body = replace_once(body, 'local sample_policy = make_sample_policy(hd2, mod)',
                 'local sample_policy = fixture_sample_policy')
@@ -217,7 +218,7 @@ local function packaged_addon_loads()
     state:load_addon(false)
     assert(state.menu_id == 'field_sample_drops', 'expected an independent FieldSampleDrops menu ID')
     assert_count(state.subscriptions.entity_killed or {}, 1, 'packaged entity_killed listeners')
-    assert_count(state.subscriptions.player_kill_credited or {}, 0, 'packaged aggregate-kill listeners')
+    assert_count(state.subscriptions.player_kill_credited or {}, 1, 'packaged kill diagnostics listener')
     state:start(true)
     state:kill(1, {x = 10, y = 0, z = 0})
     assert(state.logs[#state.logs]:find('[FieldSampleDrops] Game world unavailable', 1, true),
@@ -477,6 +478,37 @@ local function sample_tier_policy()
     assert(state.policy_resets == 2, 'tier policy resets at each mission start')
 end
 
+local function kill_diagnostics()
+    local state = new_fixture()
+    state.config = 'show_ui = 0\nthreshold_1 = 1'
+    state:load_addon(true)
+    state:start(true)
+    local function logged(message)
+        local count = 0
+        for _, line in ipairs(state.logs) do
+            if line:find(message, 1, true) then count = count + 1 end
+        end
+        return count
+    end
+
+    state:emit('player_kill_credited', {kills = 20, total = 20})
+    state:advance(30)
+    assert(logged('kill events 0, stat kills 20, nearby counted 0') == 1)
+    assert_count(state.attempts, 0, 'stat kills never submit pickups')
+    state.player_position = nil
+    state:kill(1, {x = 1, y = 0, z = 0})
+    state:kill(2, {x = 1, y = 0, z = 0})
+    assert(logged('local Helldiver position unavailable') == 1)
+    state.player_position = {x = 0, y = 0, z = 0}
+    state:kill(3, {x = 31, y = 0, z = 0})
+    state:kill(4, {x = 40, y = 0, z = 0})
+    assert(logged('exceeds 30 m radius') == 1)
+    state:kill(5, {x = 30, y = 0, z = 0})
+    state:finish()
+    assert(logged('kill events 5, stat kills 20, nearby counted 1') == 1)
+    assert_count(state.drops, 1, 'one fully qualified kill submits a pickup')
+end
+
 packaged_addon_loads()
 default_thresholds()
 qualifying_kills_and_ini()
@@ -488,3 +520,4 @@ invalid_radius_falls_back()
 deferred_pickup_at_most_once()
 stale_retry_cleared()
 sample_tier_policy()
+kill_diagnostics()
