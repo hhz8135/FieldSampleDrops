@@ -29,7 +29,7 @@
 - **Optional:** Mod Options Menu for in-game settings and Treasure Map **1.4.0** for sample type detection.
 - **Multiplayer:** The host spawns drops when the mod is installed on their side. A co-op test before the 0.5 audit confirmed that all players could pick up the drops.
 
-1. For **v1.2.1**, build the installer ZIP using the instructions below. The published [v1.2.0 installer ZIP](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip) targets HellForge 0.4.
+1. For HellForge **0.5.0-beta**, download `FieldSampleDrops-1.2.1.zip` from the [v1.2.1 release](https://github.com/hhz8135/FieldSampleDrops/releases/tag/v1.2.1). For HellForge **0.4**, use the [v1.2.0 installer ZIP](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip).
 2. Import and enable the ZIP in the **HellForge Launcher** under **Mods**, then restart the game session. If you use a mod manager such as HDArsenal, select your HellForge installation as the deployment target.
 3. With Mod Options Menu installed, go to **Esc → MODS → 战地样本掉落 · 联机版** to adjust the thresholds and range. Changes apply from the next mission.
 
@@ -82,7 +82,7 @@ Original code contributed to FieldSampleDrops is licensed under the [MIT License
 - **可选前置：** Mod Options Menu 提供游戏内设置。Treasure Map **1.4.0** 用于辅助判断样本类型。
 - **联机：** 房主安装模组后可触发掉落。此次 0.5 审计之前的双人实机测试确认，掉落的样本全队都可以拾取。
 
-1. 按下方步骤构建 **v1.2.1** 安装包。已发布的 [v1.2.0 安装包](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip) 面向 HellForge 0.4。
+1. 使用 HellForge **0.5.0-beta** 时，请从 [v1.2.1 发布页](https://github.com/hhz8135/FieldSampleDrops/releases/tag/v1.2.1)下载 `FieldSampleDrops-1.2.1.zip`。使用 HellForge **0.4** 时，请下载 [v1.2.0 安装包](https://raw.githubusercontent.com/hhz8135/FieldSampleDrops/v1.2.0/releases/FieldSampleDrops-1.2.0.zip)。
 2. 在 **HellForge 启动器 → Mods** 中导入并启用 ZIP，重启游戏会话。使用 HDArsenal 等模组管理器时，请将部署目标设为 HellForge 安装目录。
 3. 如果装了 Mod Options Menu，在 **Esc → MODS → 战地样本掉落 · 联机版** 调整阈值与距离，下一局生效。
 
